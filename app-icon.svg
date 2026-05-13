@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+
+  <!-- D / play mark (evenodd cuts out the counter) -->
+  <path fill-rule="evenodd" d="
+    M300 200 L520 200 L760 512 L520 824 L300 824 Z
+    M400 340 L500 340 L620 512 L500 684 L400 684 Z
+  " fill="white"/>
+</svg>
