@@ -1,11 +1,27 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 
 export function Player() {
   const { playerVideos, playerIndex, closePlayer, setPlayerIndex } = useStore()
   const videoRef = useRef<HTMLVideoElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      containerRef.current?.requestFullscreen()
+    }
+  }
 
   const video = playerVideos?.[playerIndex]
   const total = playerVideos?.length ?? 0
@@ -23,7 +39,8 @@ export function Player() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closePlayer()
+      if (e.key === 'Escape' && !document.fullscreenElement) closePlayer()
+      if (e.key === 'f' || e.key === 'F') toggleFullscreen()
       if (e.key === 'ArrowRight' && hasNext) setPlayerIndex(playerIndex + 1)
       if (e.key === 'ArrowLeft' && hasPrev) setPlayerIndex(playerIndex - 1)
     }
@@ -39,7 +56,7 @@ export function Player() {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+    <div ref={containerRef} className="fixed inset-0 z-50 bg-black flex flex-col">
       {/* Header bar */}
       <div className="flex items-center gap-3 px-4 py-3 bg-zinc-900/80 shrink-0">
         <div className="flex-1 min-w-0">
@@ -49,6 +66,13 @@ export function Player() {
           )}
         </div>
         <button
+          onClick={toggleFullscreen}
+          title={isFullscreen ? 'Exit full screen (F)' : 'Full screen (F)'}
+          className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+        >
+          {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+        <button
           onClick={closePlayer}
           className="p-1.5 hover:bg-zinc-700 rounded text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
         >
@@ -57,13 +81,13 @@ export function Player() {
       </div>
 
       {/* Video */}
-      <div className="flex-1 flex items-center justify-center bg-black min-h-0">
+      <div className="flex-1 bg-black min-h-0 relative">
         <video
           ref={videoRef}
           src={convertFileSrc(video.file_path)}
           controls
           autoPlay
-          className="max-w-full max-h-full"
+          className="absolute inset-0 w-full h-full object-contain"
           onEnded={handleEnded}
           style={{ outline: 'none' }}
         />
