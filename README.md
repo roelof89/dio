@@ -102,7 +102,7 @@ App preferences (last-connected drive path) are stored locally at:
 - **Phase 4** ✅ — Three-pane UI shell: sidebar, thumbnail grid, play tray
 - **Phase 5** ✅ — Entity moves, categories, ratings, playlists, in-app player
 - **Phase 6** ✅ — Duplicate detection and staged review workflow
-- **Phase 7** 🔄 — Background file watcher (pending), progress bar polish
+- **Phase 7** ✅ — Background file watcher (FSEvents + 2s debounce), scan-now banner
 
 ## Dev setup
 
