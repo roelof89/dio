@@ -1,0 +1,488 @@
+import { invoke } from '@tauri-apps/api/core'
+import { Check, Film, MoveRight, Plus, Star, Tag, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useStore } from '../store'
+import { Category, Entity, Video } from '../types'
+import { ConfirmModal } from './ConfirmModal'
+
+// ── Thumbnail cache ───────────────────────────────────────────────────────────
+
+const thumbCache = new Map<string, string>()
+
+function ThumbnailImg({ path, alt }: { path: string; alt: string }) {
+  const [src, setSrc] = useState<string | null>(thumbCache.get(path) ?? null)
+  useEffect(() => {
+    if (src) return
+    invoke<string>('get_thumbnail', { path })
+      .then((d) => { thumbCache.set(path, d); setSrc(d) })
+      .catch(() => {})
+  }, [path])
+  if (!src) return <Film className="w-8 h-8 text-zinc-600" />
+  return <img src={src} alt={alt} className="w-full h-full object-cover" />
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function formatDuration(s: number) {
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  return `${m}:${String(sec).padStart(2, '0')}`
+}
+
+// ── Star Rating ───────────────────────────────────────────────────────────────
+
+function StarRating({ videoId, rating, onUpdate }: { videoId: number; rating: number; onUpdate: () => void }) {
+  const [hover, setHover] = useState(0)
+  const handle = async (star: number) => {
+    await invoke('update_video_rating', { videoId, rating: star === rating ? 0 : star })
+    onUpdate()
+  }
+  return (
+    <div className="flex gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button key={star}
+          onMouseEnter={() => setHover(star)} onMouseLeave={() => setHover(0)}
+          onClick={() => handle(star)}
+          className={`transition-colors ${star <= (hover || rating) ? 'text-yellow-400' : 'text-zinc-700 hover:text-zinc-500'}`}
+        >
+          <Star className="w-3 h-3" fill={star <= (hover || rating) ? 'currentColor' : 'none'} />
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Context menu shared helpers ───────────────────────────────────────────────
+
+function refreshLists() {
+  invoke<Entity[]>('get_entities').then(useStore.getState().setEntities).catch(() => {})
+  invoke<Category[]>('get_categories').then(useStore.getState().setCategories).catch(() => {})
+}
+
+// ── Single-video context menu ─────────────────────────────────────────────────
+
+function ContextMenu({ x, y, video, onClose, onRefresh }: {
+  x: number; y: number; video: Video; onClose: () => void; onRefresh: () => void
+}) {
+  const { entities, categories } = useStore()
+  const [step, setStep] = useState<null | 'move' | 'cats'>(null)
+  const [videoCats, setVideoCats] = useState<Category[]>([])
+  const [err, setErr] = useState<string | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  useEffect(() => {
+    refreshLists()
+    invoke<Category[]>('get_video_categories', { videoId: video.id }).then(setVideoCats)
+  }, [video.id])
+
+  const left = Math.min(x, window.innerWidth - 215)
+  const top  = Math.min(y, window.innerHeight - 230)
+  const base = 'fixed bg-zinc-800 border border-zinc-600 rounded-lg shadow-2xl py-1 z-50 text-sm w-52'
+  const row  = 'w-full px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 flex items-center gap-2 transition-colors'
+
+  const handleMove = async (id: number) => {
+    try { await invoke('move_video_to_entity', { videoId: video.id, targetEntityId: id }) }
+    catch (e) { setErr(String(e)); setStep(null); return }
+    await onRefresh(); onClose()
+  }
+  const handleToggleCat = async (catId: number) => {
+    const on = videoCats.some((c) => c.id === catId)
+    await invoke(on ? 'remove_video_category' : 'add_video_category', { videoId: video.id, categoryId: catId })
+    invoke<Category[]>('get_video_categories', { videoId: video.id }).then(setVideoCats)
+  }
+  const executeDelete = async () => {
+    setShowDeleteConfirm(false)
+    try { await invoke('delete_video', { videoId: video.id }); await onRefresh(); onClose() }
+    catch (e) { setErr(String(e)) }
+  }
+
+  const others = entities.filter((e) => e.id !== video.entity_id)
+
+  if (step === 'move') return (
+    <div className={base} style={{ left, top }}>
+      <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1" />
+      {others.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No other entities</p>
+        : others.map((e) => (
+          <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleMove(e.id) }} className={row}>
+            <MoveRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
+          </button>
+        ))}
+    </div>
+  )
+  if (step === 'cats') return (
+    <div className={base} style={{ left, top }}>
+      <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1" />
+      {categories.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No categories yet</p>
+        : categories.map((c) => {
+          const on = videoCats.some((vc) => vc.id === c.id)
+          return (
+            <button key={c.id} onClick={(e) => { e.stopPropagation(); handleToggleCat(c.id) }} className={row}>
+              <Check className={`w-3.5 h-3.5 shrink-0 ${on ? 'text-green-400' : 'opacity-0'}`} />
+              {c.name}
+            </button>
+          )
+        })}
+    </div>
+  )
+  return (
+    <div className={base} style={{ left, top }}>
+      {showDeleteConfirm && (
+        <ConfirmModal
+          message={`Delete "${video.file_name}"?\n\nThis permanently removes the file.`}
+          onConfirm={executeDelete}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+      {err && <p className="px-3 py-1.5 text-xs text-red-400 border-b border-zinc-700">{err}</p>}
+      <button onClick={(e) => { e.stopPropagation(); setStep('move') }} className={`${row} justify-between`}>
+        <span className="flex items-center gap-2"><MoveRight className="w-3.5 h-3.5 text-zinc-400" />Move to entity</span>
+        <span className="text-zinc-500 text-xs">&#9654;</span>
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setStep('cats') }} className={`${row} justify-between`}>
+        <span className="flex items-center gap-2">
+          <Tag className="w-3.5 h-3.5 text-zinc-400" />Categories
+          {videoCats.length > 0 && <span className="text-[10px] bg-indigo-600 text-white rounded px-1">{videoCats.length}</span>}
+        </span>
+        <span className="text-zinc-500 text-xs">&#9654;</span>
+      </button>
+      <div className="border-t border-zinc-700 my-1" />
+      <button onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true) }} className={`${row} text-red-400`}>
+        <Trash2 className="w-3.5 h-3.5 shrink-0" />Delete file
+      </button>
+    </div>
+  )
+}
+
+// ── Bulk context menu ─────────────────────────────────────────────────────────
+
+function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelection }: {
+  x: number; y: number; selectedIds: number[]
+  onClose: () => void; onRefresh: () => void; onClearSelection: () => void
+}) {
+  const { entities, categories } = useStore()
+  const [step, setStep] = useState<null | 'move' | 'add_cat' | 'rm_cat'>(null)
+  const [working, setWorking] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  useEffect(() => { refreshLists() }, [])
+
+  const left = Math.min(x, window.innerWidth - 225)
+  const top  = Math.min(y, window.innerHeight - 290)
+  const base = 'fixed bg-zinc-800 border border-zinc-600 rounded-lg shadow-2xl py-1 z-50 text-sm w-56'
+  const row  = 'w-full px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 flex items-center gap-2 transition-colors'
+
+  const runOnAll = async (fn: (id: number) => Promise<void>) => {
+    setWorking(true)
+    for (const id of selectedIds) { try { await fn(id) } catch {} }
+    setWorking(false)
+  }
+
+  const handleMoveAll = async (targetEntityId: number) => {
+    await runOnAll((id) => invoke('move_video_to_entity', { videoId: id, targetEntityId }))
+    await onRefresh(); onClearSelection(); onClose()
+  }
+  const handleAddCatAll = async (catId: number) => {
+    await runOnAll((id) => invoke('add_video_category', { videoId: id, categoryId: catId }))
+    onClose()
+  }
+  const handleRmCatAll = async (catId: number) => {
+    await runOnAll((id) => invoke('remove_video_category', { videoId: id, categoryId: catId }))
+    onClose()
+  }
+  const executeDeleteAll = async () => {
+    setShowDeleteConfirm(false)
+    await runOnAll((id) => invoke('delete_video', { videoId: id }))
+    await onRefresh(); onClearSelection(); onClose()
+  }
+
+  const backBtn = (e: React.MouseEvent) => { e.stopPropagation(); setStep(null) }
+
+  if (step === 'move') return (
+    <div className={base} style={{ left, top }}>
+      <button onClick={backBtn} className={`${row} text-zinc-400 text-xs`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1" />
+      {entities.map((e) => (
+        <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleMoveAll(e.id) }} className={row} disabled={working}>
+          <MoveRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
+        </button>
+      ))}
+    </div>
+  )
+  if (step === 'add_cat') return (
+    <div className={base} style={{ left, top }}>
+      <button onClick={backBtn} className={`${row} text-zinc-400 text-xs`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1" />
+      {categories.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No categories yet</p>
+        : categories.map((c) => (
+          <button key={c.id} onClick={(ev) => { ev.stopPropagation(); handleAddCatAll(c.id) }} className={row} disabled={working}>
+            <Tag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{c.name}
+          </button>
+        ))}
+    </div>
+  )
+  if (step === 'rm_cat') return (
+    <div className={base} style={{ left, top }}>
+      <button onClick={backBtn} className={`${row} text-zinc-400 text-xs`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1" />
+      {categories.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No categories yet</p>
+        : categories.map((c) => (
+          <button key={c.id} onClick={(ev) => { ev.stopPropagation(); handleRmCatAll(c.id) }} className={row} disabled={working}>
+            <Tag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{c.name}
+          </button>
+        ))}
+    </div>
+  )
+  return (
+    <div className={base} style={{ left, top }}>
+      {showDeleteConfirm && (
+        <ConfirmModal
+          message={`Delete ${selectedIds.length} video${selectedIds.length !== 1 ? 's' : ''}?\n\nThis permanently removes the files.`}
+          onConfirm={executeDeleteAll}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+      <p className="px-3 py-1 text-[10px] font-semibold text-zinc-400 border-b border-zinc-700 mb-1">
+        {selectedIds.length} videos selected
+      </p>
+      <button onClick={(e) => { e.stopPropagation(); setStep('move') }} className={`${row} justify-between`} disabled={working}>
+        <span className="flex items-center gap-2"><MoveRight className="w-3.5 h-3.5 text-zinc-400" />Move all to entity</span>
+        <span className="text-zinc-500 text-xs">&#9654;</span>
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setStep('add_cat') }} className={`${row} justify-between`} disabled={working}>
+        <span className="flex items-center gap-2"><Tag className="w-3.5 h-3.5 text-zinc-400" />Add category to all</span>
+        <span className="text-zinc-500 text-xs">&#9654;</span>
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setStep('rm_cat') }} className={`${row} justify-between`} disabled={working}>
+        <span className="flex items-center gap-2"><Tag className="w-3.5 h-3.5 text-zinc-400" />Remove category from all</span>
+        <span className="text-zinc-500 text-xs">&#9654;</span>
+      </button>
+      <div className="border-t border-zinc-700 my-1" />
+      <button onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true) }} className={`${row} text-red-400`} disabled={working}>
+        <Trash2 className="w-3.5 h-3.5 shrink-0" />Delete {selectedIds.length} video{selectedIds.length !== 1 ? 's' : ''}
+      </button>
+      <div className="border-t border-zinc-700 my-1" />
+      <button onClick={(e) => { e.stopPropagation(); onClearSelection(); onClose() }} className={`${row} text-zinc-400`}>
+        <X className="w-3.5 h-3.5 shrink-0" />Clear selection
+      </button>
+    </div>
+  )
+}
+
+// ── VideoGrid ─────────────────────────────────────────────────────────────────
+
+export function VideoGrid() {
+  const {
+    videos, selectedEntityId, entities, addToQueue, setVideos, openPlayer,
+    categories, selectedCategoryIds,
+  } = useStore()
+  const selectedEntity = entities.find((e) => e.id === selectedEntityId)
+
+  // Single-video context menu
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; video: Video } | null>(null)
+  // Bulk context menu
+  const [bulkMenu, setBulkMenu] = useState<{ x: number; y: number } | null>(null)
+  // Multi-selection
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null)
+
+  // Close menus on outside click
+  useEffect(() => {
+    if (!ctxMenu && !bulkMenu) return
+    const close = () => { setCtxMenu(null); setBulkMenu(null) }
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
+  }, [ctxMenu, bulkMenu])
+
+  // Clear selection when view changes
+  useEffect(() => { setSelectedIds(new Set()); setLastSelectedIndex(null) }, [selectedEntityId, selectedCategoryIds])
+
+  // Reload videos when filters change
+  useEffect(() => {
+    if (!selectedEntityId && selectedCategoryIds.length === 0) { setVideos([]); return }
+    invoke<Video[]>('get_videos_filtered', {
+      entityId: selectedEntityId ?? null,
+      categoryIds: selectedCategoryIds,
+    }).then(setVideos).catch(() => {})
+  }, [selectedEntityId, selectedCategoryIds])
+
+  const reloadVideos = async () => {
+    invoke<Video[]>('get_videos_filtered', {
+      entityId: selectedEntityId ?? null,
+      categoryIds: selectedCategoryIds,
+    }).then(setVideos).catch(() => {})
+  }
+
+  const handleVideoClick = (e: React.MouseEvent, video: Video, index: number) => {
+    e.stopPropagation() // prevent click bubbling to the empty-space deselect handler
+    setCtxMenu(null)
+    setBulkMenu(null)
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault()
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.has(video.id) ? next.delete(video.id) : next.add(video.id)
+        return next
+      })
+      setLastSelectedIndex(index)
+    } else if (e.shiftKey && lastSelectedIndex !== null) {
+      e.preventDefault()
+      const lo = Math.min(lastSelectedIndex, index)
+      const hi = Math.max(lastSelectedIndex, index)
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        videos.slice(lo, hi + 1).forEach((v) => next.add(v.id))
+        return next
+      })
+    } else if (selectedIds.size > 0) {
+      setSelectedIds(new Set())
+      setLastSelectedIndex(null)
+      openPlayer(videos, index)
+    } else {
+      setLastSelectedIndex(index)
+      openPlayer(videos, index)
+    }
+  }
+
+  const handleVideoContextMenu = (e: React.MouseEvent, video: Video) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (selectedIds.size > 1 && selectedIds.has(video.id)) {
+      // Right-click on a selected video when multiple selected → bulk menu
+      setBulkMenu({ x: e.clientX, y: e.clientY })
+    } else {
+      // Clear selection, show single-video menu
+      setSelectedIds(new Set())
+      setCtxMenu({ x: e.clientX, y: e.clientY, video })
+    }
+  }
+
+  if (!selectedEntityId && selectedCategoryIds.length === 0) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-zinc-700 bg-zinc-900">
+        <div className="text-center space-y-2">
+          <Film className="w-12 h-12 mx-auto" />
+          <p className="text-sm">Select an entity or category to view videos</p>
+        </div>
+      </div>
+    )
+  }
+
+  const activeCategories = categories.filter((c) => selectedCategoryIds.includes(c.id))
+  const headerLabel = selectedEntity
+    ? selectedEntity.name
+    : activeCategories.map((c) => c.name).join(', ')
+
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden bg-zinc-900">
+      {/* Header */}
+      <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center gap-3 shrink-0">
+        <span className="font-medium text-zinc-100">{headerLabel}</span>
+        {selectedCategoryIds.length > 0 && (
+          <span className="flex items-center gap-1 text-[10px] text-indigo-400 bg-indigo-950/60 px-1.5 py-0.5 rounded">
+            <Tag className="w-2.5 h-2.5" />
+            {selectedCategoryIds.length === 1 ? activeCategories[0]?.name : `${selectedCategoryIds.length} categories`}
+          </span>
+        )}
+        {selectedIds.size > 0 && (
+          <span className="flex items-center gap-2 ml-auto">
+            <span className="text-xs text-blue-400 font-medium">{selectedIds.size} selected</span>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              clear
+            </button>
+          </span>
+        )}
+        {selectedIds.size === 0 && (
+          <span className="text-xs text-zinc-500 ml-auto">{videos.length} video{videos.length !== 1 ? 's' : ''}</span>
+        )}
+      </div>
+
+      {videos.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-zinc-700">
+          <div className="text-center space-y-2">
+            <Film className="w-10 h-10 mx-auto" />
+            <p className="text-sm">No videos match this filter</p>
+            <p className="text-xs text-zinc-600">Try a different entity or category</p>
+          </div>
+        </div>
+      ) : (
+        <div
+          className="flex-1 overflow-y-auto p-4"
+          onClick={() => { if (selectedIds.size > 0) setSelectedIds(new Set()) }}
+        >
+          <p className="text-[10px] text-zinc-600 mb-3">
+            ⌘ click to select · shift click for range · right-click selection for bulk actions
+          </p>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+            {videos.map((video, index) => {
+              const isSelected = selectedIds.has(video.id)
+              return (
+                <div key={video.id}
+                  onClick={(e) => handleVideoClick(e, video, index)}
+                  onContextMenu={(e) => handleVideoContextMenu(e, video)}
+                  className={`group relative bg-zinc-800 rounded-lg overflow-hidden cursor-pointer transition-all ${
+                    isSelected
+                      ? 'ring-2 ring-blue-500'
+                      : 'hover:ring-2 hover:ring-blue-500/50'
+                  }`}
+                >
+                  {/* Selection badge */}
+                  {isSelected && (
+                    <div className="absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
+                      <Check className="w-3 h-3 text-white" />
+                    </div>
+                  )}
+
+                  <div className="aspect-video bg-zinc-700 flex items-center justify-center overflow-hidden">
+                    {video.thumbnail_path
+                      ? <ThumbnailImg path={video.thumbnail_path} alt={video.file_name} />
+                      : <Film className="w-8 h-8 text-zinc-600" />}
+                  </div>
+
+                  <div className="p-2">
+                    <p className="text-xs text-zinc-300 truncate leading-snug">{video.file_name}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      {video.duration != null
+                        ? <span className="text-[10px] text-zinc-500">{formatDuration(video.duration)}</span>
+                        : <span />}
+                      <StarRating videoId={video.id} rating={video.rating} onUpdate={reloadVideos} />
+                    </div>
+                  </div>
+
+                  {/* Add to queue (only when not in selection mode) */}
+                  {selectedIds.size === 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); addToQueue(video) }}
+                      title="Add to play tray"
+                      className="absolute top-1.5 right-1.5 p-1 bg-zinc-900/80 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-blue-600 text-zinc-300 hover:text-white"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {ctxMenu && (
+        <ContextMenu x={ctxMenu.x} y={ctxMenu.y} video={ctxMenu.video}
+          onClose={() => setCtxMenu(null)} onRefresh={reloadVideos} />
+      )}
+      {bulkMenu && (
+        <BulkContextMenu
+          x={bulkMenu.x} y={bulkMenu.y}
+          selectedIds={Array.from(selectedIds)}
+          onClose={() => setBulkMenu(null)}
+          onRefresh={reloadVideos}
+          onClearSelection={() => setSelectedIds(new Set())}
+        />
+      )}
+    </div>
+  )
+}
