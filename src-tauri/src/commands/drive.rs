@@ -95,7 +95,10 @@ pub async fn get_data_source(state: State<'_, AppState>) -> Result<Option<DataSo
 }
 
 #[tauri::command]
-pub async fn disconnect_drive(state: State<'_, AppState>) -> Result<()> {
+pub async fn disconnect_drive(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<()> {
     // Stop watcher first (drop releases the OS watch handle)
     { let mut g = state.watcher.lock().unwrap(); *g = None; }
 
@@ -106,8 +109,14 @@ pub async fn disconnect_drive(state: State<'_, AppState>) -> Result<()> {
     if let Some(pool) = maybe_pool {
         pool.close().await;
     }
-    let mut guard = state.drive_path.lock().unwrap();
-    *guard = None;
+    {
+        let mut guard = state.drive_path.lock().unwrap();
+        *guard = None;
+    }
+
+    // Clear persisted last-drive so restart won't auto-reconnect
+    let _ = prefs::save(&app, &Prefs { last_drive_path: None });
+
     Ok(())
 }
 

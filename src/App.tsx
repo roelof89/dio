@@ -116,6 +116,7 @@ function App() {
   if (!dataSource) {
     return (
       <div className="h-screen bg-zinc-900 flex items-center justify-center text-zinc-100">
+        <div data-tauri-drag-region className="absolute inset-x-0 top-0 h-12" />
         <div className="text-center space-y-4">
           <HardDrive className="w-14 h-14 mx-auto text-zinc-600" />
           <h1 className="text-2xl font-semibold tracking-tight">Dio</h1>
@@ -134,7 +135,7 @@ function App() {
   return (
     <div className="h-screen bg-zinc-900 text-zinc-100 flex flex-col select-none">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-zinc-800 border-b border-zinc-700 shrink-0">
+      <div data-tauri-drag-region className="flex items-center gap-2 pl-20 pr-4 py-2 bg-zinc-800 border-b border-zinc-700 shrink-0">
         <HardDrive className="w-4 h-4 text-zinc-400 shrink-0" />
         <span className="text-sm font-medium">{dataSource.name}</span>
         <span className="text-xs text-zinc-600 truncate hidden sm:block">{dataSource.path}</span>
