@@ -107,6 +107,7 @@ pub async fn scan_entity(
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.file_type().is_file()
+                && !e.file_name().to_string_lossy().starts_with(".")
                 && e.path()
                     .extension()
                     .and_then(|x| x.to_str())
