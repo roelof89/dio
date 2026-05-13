@@ -5,6 +5,7 @@ mod prefs;
 mod scanner;
 mod state;
 mod video;
+mod watcher;
 
 use state::AppState;
 

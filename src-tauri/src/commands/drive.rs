@@ -52,10 +52,20 @@ pub async fn connect_drive(
     }
     {
         let mut guard = state.drive_path.lock().unwrap();
-        *guard = Some(drive_root);
+        *guard = Some(drive_root.clone());
     }
 
     let _ = prefs::save(&app, &Prefs { last_drive_path: Some(path) });
+
+    // Start watching the entity directory for new video files
+    let entity_root = drive_root.join("entity");
+    match crate::watcher::start(&entity_root, app.clone()) {
+        Ok(w) => {
+            let mut guard = state.watcher.lock().unwrap();
+            *guard = Some(w);
+        }
+        Err(e) => eprintln!("[watcher] failed to start: {e}"),
+    }
 
     Ok(ds)
 }
@@ -86,6 +96,9 @@ pub async fn get_data_source(state: State<'_, AppState>) -> Result<Option<DataSo
 
 #[tauri::command]
 pub async fn disconnect_drive(state: State<'_, AppState>) -> Result<()> {
+    // Stop watcher first (drop releases the OS watch handle)
+    { let mut g = state.watcher.lock().unwrap(); *g = None; }
+
     let maybe_pool = {
         let mut guard = state.db.lock().unwrap();
         guard.take()

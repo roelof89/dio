@@ -25,4 +25,5 @@ walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 chrono = "0.4"
 base64 = "0.22"
+notify = "6"
 

@@ -1,3 +1,4 @@
+use notify::RecommendedWatcher;
 use sqlx::SqlitePool;
 use std::{path::PathBuf, sync::Mutex};
 
@@ -6,6 +7,8 @@ use crate::error::{DioError, Result};
 pub struct AppState {
     pub db: Mutex<Option<SqlitePool>>,
     pub drive_path: Mutex<Option<PathBuf>>,
+    /// Dropping this stops the file watcher.
+    pub watcher: Mutex<Option<RecommendedWatcher>>,
 }
 
 impl AppState {
@@ -13,6 +16,7 @@ impl AppState {
         Self {
             db: Mutex::new(None),
             drive_path: Mutex::new(None),
+            watcher: Mutex::new(None),
         }
     }
 

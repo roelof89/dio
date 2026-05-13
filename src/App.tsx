@@ -15,6 +15,7 @@ function App() {
   const { dataSource, setDataSource, setEntities, setCategories } = useStore()
   const [scanStatus, setScanStatus] = useState<string | null>(null)
   const [showDuplicates, setShowDuplicates] = useState(false)
+  const [newFilesDetected, setNewFilesDetected] = useState(false)
   const [leftWidth, setLeftWidth] = useState(240)
   const [rightWidth, setRightWidth] = useState(240)
 
@@ -77,6 +78,11 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const unlisten = listen('files_changed', () => setNewFilesDetected(true))
+    return () => { unlisten.then((fn) => fn()) }
+  }, [])
+
+  useEffect(() => {
     // Auto-connect to last drive if still available
     invoke<string | null>('get_last_drive_path').then(async (path) => {
       if (!path) return
@@ -104,6 +110,7 @@ function App() {
     setDataSource(null)
     setEntities([])
     setCategories([])
+    setNewFilesDetected(false)
   }
 
   if (!dataSource) {
@@ -131,6 +138,23 @@ function App() {
         <HardDrive className="w-4 h-4 text-zinc-400 shrink-0" />
         <span className="text-sm font-medium">{dataSource.name}</span>
         <span className="text-xs text-zinc-600 truncate hidden sm:block">{dataSource.path}</span>
+        {newFilesDetected && !scanStatus && (
+          <span className="flex items-center gap-2">
+            <span className="text-xs text-amber-400 font-medium">New videos detected</span>
+            <button
+              onClick={() => { setNewFilesDetected(false); handleScanAll() }}
+              className="text-xs px-2 py-0.5 bg-amber-600 hover:bg-amber-500 rounded transition-colors"
+            >
+              Scan now
+            </button>
+            <button
+              onClick={() => setNewFilesDetected(false)}
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              dismiss
+            </button>
+          </span>
+        )}
         {scanStatus && (
           <span className="text-xs text-zinc-400 truncate max-w-xs">{scanStatus}</span>
         )}
