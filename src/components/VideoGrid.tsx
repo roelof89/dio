@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import { Check, Film, MoveRight, Plus, Star, Tag, Trash2, X } from 'lucide-react'
+import { ArrowDownAZ, ArrowUpAZ, Check, ChevronDown, Film, Link, MoveRight, Pencil, Plus, Star, Tag, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useStore } from '../store'
 import { Category, Entity, Video } from '../types'
@@ -65,10 +65,11 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
   x: number; y: number; video: Video; onClose: () => void; onRefresh: () => void
 }) {
   const { entities, categories } = useStore()
-  const [step, setStep] = useState<null | 'move' | 'cats'>(null)
+  const [step, setStep] = useState<null | 'move' | 'link' | 'cats' | 'rename'>(null)
   const [videoCats, setVideoCats] = useState<Category[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
 
   useEffect(() => {
     refreshLists()
@@ -96,18 +97,73 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
     catch (e) { setErr(String(e)) }
   }
 
+  const handleRename = async () => {
+    try {
+      await invoke('rename_video', { videoId: video.id, newName: renameValue })
+      await onRefresh(); onClose()
+    } catch (e) { setErr(String(e)); setStep(null) }
+  }
+
+  // Strip extension for the rename input
+  const nameWithoutExt = (name: string) => {
+    const dot = name.lastIndexOf('.')
+    return dot > 0 ? name.substring(0, dot) : name
+  }
+
+  const handleLink = async (id: number) => {
+    try { await invoke('link_video_to_entity', { videoId: video.id, targetEntityId: id }) }
+    catch (e) { setErr(String(e)); setStep(null); return }
+    onClose()
+  }
+
   const others = entities.filter((e) => e.id !== video.entity_id)
 
-  if (step === 'move') return (
+  if (step === 'link') return (
+    <div className={base} style={{ left, top, maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs shrink-0`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1 shrink-0" />
+      <div className="overflow-y-auto min-h-0">
+        {others.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No other entities</p>
+          : others.map((e) => (
+            <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleLink(e.id) }} className={row}>
+              <Link className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
+            </button>
+          ))}
+      </div>
+    </div>
+  )
+  if (step === 'rename') return (
     <div className={base} style={{ left, top }}>
-      <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs`}>← Back</button>
-      <div className="border-t border-zinc-700 my-1" />
-      {others.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No other entities</p>
-        : others.map((e) => (
-          <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleMove(e.id) }} className={row}>
-            <MoveRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
-          </button>
-        ))}
+      {err && <p className="px-3 py-1.5 text-xs text-red-400 border-b border-zinc-700">{err}</p>}
+      <form onSubmit={(e) => { e.preventDefault(); handleRename() }} className="p-2 space-y-2">
+        <input
+          autoFocus
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          className="w-full px-2 py-1 text-xs bg-zinc-700 border border-zinc-600 rounded focus:outline-none focus:border-blue-500 text-zinc-200"
+          onClick={(e) => e.stopPropagation()}
+        />
+        <div className="flex gap-1 justify-end">
+          <button type="button" onClick={(e) => { e.stopPropagation(); setStep(null) }}
+            className="px-2 py-0.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+          <button type="submit" onClick={(e) => e.stopPropagation()}
+            className="px-2 py-0.5 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors">Rename</button>
+        </div>
+      </form>
+    </div>
+  )
+  if (step === 'move') return (
+    <div className={base} style={{ left, top, maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs shrink-0`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1 shrink-0" />
+      <div className="overflow-y-auto min-h-0">
+        {others.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No other entities</p>
+          : others.map((e) => (
+            <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleMove(e.id) }} className={row}>
+              <MoveRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
+            </button>
+          ))}
+      </div>
     </div>
   )
   if (step === 'cats') return (
@@ -136,8 +192,15 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
         />
       )}
       {err && <p className="px-3 py-1.5 text-xs text-red-400 border-b border-zinc-700">{err}</p>}
+      <button onClick={(e) => { e.stopPropagation(); setRenameValue(nameWithoutExt(video.file_name)); setStep('rename') }} className={row}>
+        <Pencil className="w-3.5 h-3.5 text-zinc-400" />Rename
+      </button>
       <button onClick={(e) => { e.stopPropagation(); setStep('move') }} className={`${row} justify-between`}>
         <span className="flex items-center gap-2"><MoveRight className="w-3.5 h-3.5 text-zinc-400" />Move to entity</span>
+        <span className="text-zinc-500 text-xs">&#9654;</span>
+      </button>
+      <button onClick={(e) => { e.stopPropagation(); setStep('link') }} className={`${row} justify-between`}>
+        <span className="flex items-center gap-2"><Link className="w-3.5 h-3.5 text-zinc-400" />Link to entity</span>
         <span className="text-zinc-500 text-xs">&#9654;</span>
       </button>
       <button onClick={(e) => { e.stopPropagation(); setStep('cats') }} className={`${row} justify-between`}>
@@ -161,7 +224,7 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
   x: number; y: number; selectedIds: number[]
   onClose: () => void; onRefresh: () => void; onClearSelection: () => void
 }) {
-  const { entities, categories } = useStore()
+  const { entities, categories, addToQueue } = useStore()
   const [step, setStep] = useState<null | 'move' | 'add_cat' | 'rm_cat'>(null)
   const [working, setWorking] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -200,14 +263,16 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
   const backBtn = (e: React.MouseEvent) => { e.stopPropagation(); setStep(null) }
 
   if (step === 'move') return (
-    <div className={base} style={{ left, top }}>
-      <button onClick={backBtn} className={`${row} text-zinc-400 text-xs`}>← Back</button>
-      <div className="border-t border-zinc-700 my-1" />
-      {entities.map((e) => (
-        <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleMoveAll(e.id) }} className={row} disabled={working}>
-          <MoveRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
-        </button>
-      ))}
+    <div className={base} style={{ left, top, maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <button onClick={backBtn} className={`${row} text-zinc-400 text-xs shrink-0`}>← Back</button>
+      <div className="border-t border-zinc-700 my-1 shrink-0" />
+      <div className="overflow-y-auto min-h-0">
+        {entities.map((e) => (
+          <button key={e.id} onClick={(ev) => { ev.stopPropagation(); handleMoveAll(e.id) }} className={row} disabled={working}>
+            <MoveRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />{e.name}
+          </button>
+        ))}
+      </div>
     </div>
   )
   if (step === 'add_cat') return (
@@ -246,6 +311,18 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
       <p className="px-3 py-1 text-[10px] font-semibold text-zinc-400 border-b border-zinc-700 mb-1">
         {selectedIds.length} videos selected
       </p>
+      <button onClick={(e) => {
+          e.stopPropagation()
+          const { videos } = useStore.getState()
+          selectedIds.forEach((id) => {
+            const v = videos.find((vid) => vid.id === id)
+            if (v) addToQueue(v)
+          })
+          onClose()
+        }} className={row}>
+        <Plus className="w-3.5 h-3.5 text-zinc-400" />Add to play tray
+      </button>
+      <div className="border-t border-zinc-700 my-1" />
       <button onClick={(e) => { e.stopPropagation(); setStep('move') }} className={`${row} justify-between`} disabled={working}>
         <span className="flex items-center gap-2"><MoveRight className="w-3.5 h-3.5 text-zinc-400" />Move all to entity</span>
         <span className="text-zinc-500 text-xs">&#9654;</span>
@@ -272,12 +349,51 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
 
 // ── VideoGrid ─────────────────────────────────────────────────────────────────
 
+type SortField = 'file_created_at' | 'file_modified_at' | 'created_at' | 'file_size' | 'duration' | 'rating' | 'file_name'
+type SortDir = 'asc' | 'desc'
+
+const SORT_OPTIONS: { value: SortField; label: string }[] = [
+  { value: 'file_created_at', label: 'Date Created' },
+  { value: 'file_modified_at', label: 'Date Modified' },
+  { value: 'created_at', label: 'Date Added' },
+  { value: 'file_size', label: 'File Size' },
+  { value: 'duration', label: 'Duration' },
+  { value: 'rating', label: 'Rating' },
+  { value: 'file_name', label: 'Name' },
+]
+
+function sortVideos(videos: Video[], field: SortField, dir: SortDir): Video[] {
+  const sorted = [...videos].sort((a, b) => {
+    let av: string | number | null, bv: string | number | null
+    if (field === 'file_name') {
+      av = a.file_name.toLowerCase()
+      bv = b.file_name.toLowerCase()
+    } else {
+      av = a[field] ?? null
+      bv = b[field] ?? null
+    }
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (av < bv) return -1
+    if (av > bv) return 1
+    return 0
+  })
+  return dir === 'desc' ? sorted.reverse() : sorted
+}
+
 export function VideoGrid() {
   const {
     videos, selectedEntityId, entities, addToQueue, setVideos, openPlayer,
-    categories, selectedCategoryIds,
+    categories, selectedCategoryIds, searchQuery,
   } = useStore()
   const selectedEntity = entities.find((e) => e.id === selectedEntityId)
+
+  // Sort
+  const [sortField, setSortField] = useState<SortField>('file_created_at')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  const [showSortMenu, setShowSortMenu] = useState(false)
+  const sortedVideos = sortVideos(videos, sortField, sortDir)
 
   // Single-video context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; video: Video } | null>(null)
@@ -289,24 +405,37 @@ export function VideoGrid() {
 
   // Close menus on outside click
   useEffect(() => {
-    if (!ctxMenu && !bulkMenu) return
-    const close = () => { setCtxMenu(null); setBulkMenu(null) }
+    if (!ctxMenu && !bulkMenu && !showSortMenu) return
+    const close = () => { setCtxMenu(null); setBulkMenu(null); setShowSortMenu(false) }
     window.addEventListener('click', close)
     window.addEventListener('contextmenu', close)
     return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
-  }, [ctxMenu, bulkMenu])
+  }, [ctxMenu, bulkMenu, showSortMenu])
+
+  // Cmd+A to select all
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'a' && sortedVideos.length > 0) {
+        e.preventDefault()
+        setSelectedIds(new Set(sortedVideos.map((v) => v.id)))
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [sortedVideos])
 
   // Clear selection when view changes
-  useEffect(() => { setSelectedIds(new Set()); setLastSelectedIndex(null) }, [selectedEntityId, selectedCategoryIds])
+  useEffect(() => { setSelectedIds(new Set()); setLastSelectedIndex(null) }, [selectedEntityId, selectedCategoryIds, searchQuery])
 
-  // Reload videos when filters change
+  // Reload videos when filters change (skip if search is active)
   useEffect(() => {
+    if (searchQuery) return
     if (!selectedEntityId && selectedCategoryIds.length === 0) { setVideos([]); return }
     invoke<Video[]>('get_videos_filtered', {
       entityId: selectedEntityId ?? null,
       categoryIds: selectedCategoryIds,
     }).then(setVideos).catch(() => {})
-  }, [selectedEntityId, selectedCategoryIds])
+  }, [selectedEntityId, selectedCategoryIds, searchQuery])
 
   const reloadVideos = async () => {
     invoke<Video[]>('get_videos_filtered', {
@@ -359,7 +488,7 @@ export function VideoGrid() {
     }
   }
 
-  if (!selectedEntityId && selectedCategoryIds.length === 0) {
+  if (!searchQuery && !selectedEntityId && selectedCategoryIds.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-zinc-700 bg-zinc-900">
         <div className="text-center space-y-2">
@@ -371,9 +500,11 @@ export function VideoGrid() {
   }
 
   const activeCategories = categories.filter((c) => selectedCategoryIds.includes(c.id))
-  const headerLabel = selectedEntity
-    ? selectedEntity.name
-    : activeCategories.map((c) => c.name).join(', ')
+  const headerLabel = searchQuery
+    ? `Search: "${searchQuery}"`
+    : selectedEntity
+      ? selectedEntity.name
+      : activeCategories.map((c) => c.name).join(', ')
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-zinc-900">
@@ -398,7 +529,42 @@ export function VideoGrid() {
           </span>
         )}
         {selectedIds.size === 0 && (
-          <span className="text-xs text-zinc-500 ml-auto">{videos.length} video{videos.length !== 1 ? 's' : ''}</span>
+          <span className="flex items-center gap-2 ml-auto">
+            <span className="text-xs text-zinc-500">{videos.length} video{videos.length !== 1 ? 's' : ''}</span>
+            <div className="relative">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v) }}
+                className="flex items-center gap-1 px-2 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded transition-colors"
+              >
+                {SORT_OPTIONS.find((o) => o.value === sortField)?.label}
+                <ChevronDown className="w-2.5 h-2.5" />
+              </button>
+              {showSortMenu && (
+                <div className="absolute right-0 top-full mt-1 bg-zinc-800 border border-zinc-600 rounded-lg shadow-2xl py-1 z-50 text-xs w-36">
+                  {SORT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={(e) => { e.stopPropagation(); setSortField(opt.value); setShowSortMenu(false) }}
+                      className={`w-full px-3 py-1.5 text-left hover:bg-zinc-700 transition-colors ${
+                        sortField === opt.value ? 'text-blue-400' : 'text-zinc-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setSortDir((d) => d === 'desc' ? 'asc' : 'desc')}
+              title={sortDir === 'desc' ? 'Descending (high → low)' : 'Ascending (low → high)'}
+              className="p-0.5 text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              {sortDir === 'desc'
+                ? <ArrowDownAZ className="w-3.5 h-3.5" />
+                : <ArrowUpAZ className="w-3.5 h-3.5" />}
+            </button>
+          </span>
         )}
       </div>
 
@@ -416,10 +582,10 @@ export function VideoGrid() {
           onClick={() => { if (selectedIds.size > 0) setSelectedIds(new Set()) }}
         >
           <p className="text-[10px] text-zinc-600 mb-3">
-            ⌘ click to select · shift click for range · right-click selection for bulk actions
+            ⌘A select all · ⌘ click to select · shift click for range · right-click for bulk actions
           </p>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
-            {videos.map((video, index) => {
+            {sortedVideos.map((video, index) => {
               const isSelected = selectedIds.has(video.id)
               return (
                 <div key={video.id}

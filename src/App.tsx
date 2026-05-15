@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/plugin-dialog'
-import { Copy, HardDrive, RefreshCw, ScanLine } from 'lucide-react'
+import { Copy, HardDrive, RefreshCw, ScanLine, Search, X } from 'lucide-react'
 import { Sidebar } from './components/Sidebar'
 import { VideoGrid } from './components/VideoGrid'
 import { PlayTray } from './components/PlayTray'
@@ -12,7 +12,8 @@ import { useStore } from './store'
 import { Category, DataSource, Entity, Video } from './types'
 
 function App() {
-  const { dataSource, setDataSource, setEntities, setCategories } = useStore()
+  const { dataSource, setDataSource, setEntities, setCategories, searchQuery, setSearchQuery, setVideos } = useStore()
+  const [searchInput, setSearchInput] = useState('')
   const [scanStatus, setScanStatus] = useState<string | null>(null)
   const [showDuplicates, setShowDuplicates] = useState(false)
   const [newFilesDetected, setNewFilesDetected] = useState(false)
@@ -113,6 +114,17 @@ function App() {
     setNewFilesDetected(false)
   }
 
+  // Debounced search
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInput.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  useEffect(() => {
+    if (!searchQuery) return
+    invoke<Video[]>('search_videos', { query: searchQuery }).then(setVideos).catch(() => {})
+  }, [searchQuery])
+
   if (!dataSource) {
     return (
       <div className="h-screen bg-zinc-900 flex items-center justify-center text-zinc-100">
@@ -160,6 +172,24 @@ function App() {
           <span className="text-xs text-zinc-400 truncate max-w-xs">{scanStatus}</span>
         )}
         <div className="ml-auto flex items-center gap-1">
+          <div className="relative flex items-center mr-1">
+            <Search className="absolute left-2 w-3 h-3 text-zinc-500 pointer-events-none" />
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search…"
+              className="w-44 pl-7 pr-7 py-1 text-xs bg-zinc-700/60 border border-zinc-600 rounded focus:outline-none focus:border-blue-500 text-zinc-200 placeholder-zinc-500 transition-colors"
+            />
+            {searchInput && (
+              <button
+                onClick={() => { setSearchInput(''); setSearchQuery('') }}
+                className="absolute right-1.5 p-0.5 text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           <button
             onClick={() => setShowDuplicates(true)}
             title="Check for duplicate videos"

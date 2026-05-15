@@ -23,6 +23,10 @@ interface AppStore {
   toggleCategoryFilter: (id: number) => void
   clearCategoryFilters: () => void
 
+  // Search
+  searchQuery: string
+  setSearchQuery: (query: string) => void
+
   // Play queue
   playQueue: Video[]
   addToQueue: (video: Video) => void
@@ -61,6 +65,9 @@ export const useStore = create<AppStore>((set) => ({
         : [...s.selectedCategoryIds, id],
     })),
   clearCategoryFilters: () => set({ selectedCategoryIds: [] }),
+
+  searchQuery: '',
+  setSearchQuery: (query) => set({ searchQuery: query }),
 
   playQueue: [],
   // Prevent duplicates so video.id can be used as a stable dnd key

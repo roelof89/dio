@@ -140,7 +140,7 @@ export function Sidebar() {
       </div>
 
       {/* Category section — max height so it doesn't swallow the entity list */}
-      <div className="border-t border-zinc-700 p-3 space-y-1 flex-none max-h-56 overflow-y-auto">
+      <div className="border-t border-zinc-700 p-3 space-y-1 flex-none overflow-y-auto" style={{ maxHeight: '30%' }}>
         <div className="flex items-center justify-between pb-1">
           <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest">Categories</p>
           <button onClick={() => setCreatingCat(true)} title="New category"
@@ -172,7 +172,7 @@ export function Sidebar() {
                 <span className="truncate">{cat.name}</span>
               </button>
               <button onClick={(e) => handleDeleteCategory(e, cat.id)}
-                className="opacity-0 group-hover:opacity-100 p-0.5 text-zinc-500 hover:text-red-400 transition-all shrink-0"
+                className="hidden group-hover:block p-0.5 text-zinc-500 hover:text-red-400 transition-colors shrink-0"
               ><Trash2 className="w-3 h-3" /></button>
             </div>
           )

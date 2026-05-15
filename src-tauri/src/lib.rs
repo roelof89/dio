@@ -33,6 +33,9 @@ pub fn run() {
             commands::videos::get_videos_filtered,
             commands::videos::get_thumbnail,
             commands::videos::delete_video,
+            commands::videos::rename_video,
+            commands::videos::link_video_to_entity,
+            commands::videos::search_videos,
             // categories
             commands::categories::get_categories,
             commands::categories::create_category,

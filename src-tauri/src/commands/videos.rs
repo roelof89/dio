@@ -180,6 +180,147 @@ pub async fn get_thumbnail(path: String) -> Result<String> {
     Ok(format!("data:image/jpeg;base64,{}", BASE64_STANDARD.encode(&bytes)))
 }
 
+/// Search videos by matching query words against file names, entity names,
+/// and category names. Returns a flat, deduplicated list capped at 200.
+#[tauri::command]
+pub async fn search_videos(query: String, state: State<'_, AppState>) -> Result<Vec<Video>> {
+    let pool = state.get_pool()?;
+
+    let words: Vec<String> = query
+        .split_whitespace()
+        .filter(|w| w.len() >= 2)
+        .map(|w| format!("%{w}%"))
+        .collect();
+
+    if words.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT DISTINCT v.* FROM videos v \
+         JOIN entity e ON v.entity_id = e.id \
+         WHERE (",
+    );
+
+    // file_name matches
+    for (i, w) in words.iter().enumerate() {
+        if i > 0 { qb.push(" OR "); }
+        qb.push("v.file_name LIKE ");
+        qb.push_bind(w.clone());
+    }
+
+    // entity name matches
+    qb.push(") OR (");
+    for (i, w) in words.iter().enumerate() {
+        if i > 0 { qb.push(" OR "); }
+        qb.push("e.name LIKE ");
+        qb.push_bind(w.clone());
+    }
+
+    // category name matches
+    qb.push(") OR v.id IN (SELECT cl.video_id FROM category_link cl \
+             JOIN categories c ON cl.category_id = c.id WHERE ");
+    for (i, w) in words.iter().enumerate() {
+        if i > 0 { qb.push(" OR "); }
+        qb.push("c.name LIKE ");
+        qb.push_bind(w.clone());
+    }
+
+    qb.push(") ORDER BY v.file_created_at DESC LIMIT 200");
+
+    let videos = qb.build_query_as::<Video>().fetch_all(&pool).await?;
+    Ok(videos)
+}
+
+/// Link a video to another entity without moving the file.
+/// The video still lives in its original entity but appears in the target too.
+#[tauri::command]
+pub async fn link_video_to_entity(
+    video_id: i64,
+    target_entity_id: i64,
+    state: State<'_, AppState>,
+) -> Result<()> {
+    let pool = state.get_pool()?;
+
+    // Don't link to the entity the video already lives in
+    let video = sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_one(&pool)
+        .await?;
+    if video.entity_id == target_entity_id {
+        return Err(DioError::Other("Video already belongs to this entity".into()));
+    }
+
+    sqlx::query("INSERT OR IGNORE INTO video_link (video_id, entity_id) VALUES (?, ?)")
+        .bind(video_id)
+        .bind(target_entity_id)
+        .execute(&pool)
+        .await?;
+
+    Ok(())
+}
+
+/// Rename a video file on disk and update DB references.
+#[tauri::command]
+pub async fn rename_video(
+    video_id: i64,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<Video> {
+    let pool = state.get_pool()?;
+
+    let video = sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_one(&pool)
+        .await?;
+
+    let old_path = std::path::PathBuf::from(&video.file_path);
+    let ext = old_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err(DioError::Other("Name cannot be empty".into()));
+    }
+
+    let new_file_name = if ext.is_empty() {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}.{ext}")
+    };
+
+    let new_path = old_path.with_file_name(&new_file_name);
+
+    if new_path == old_path {
+        // Nothing changed
+        return Ok(video);
+    }
+    if new_path.exists() {
+        return Err(DioError::Other(format!(
+            "'{}' already exists in this directory",
+            new_file_name
+        )));
+    }
+
+    tokio::fs::rename(&old_path, &new_path).await?;
+
+    let new_path_str = new_path.to_string_lossy().to_string();
+    sqlx::query("UPDATE videos SET file_name = ?, file_path = ? WHERE id = ?")
+        .bind(&new_file_name)
+        .bind(&new_path_str)
+        .bind(video_id)
+        .execute(&pool)
+        .await?;
+
+    let updated = sqlx::query_as::<_, Video>("SELECT * FROM videos WHERE id = ?")
+        .bind(video_id)
+        .fetch_one(&pool)
+        .await?;
+    Ok(updated)
+}
+
 /// Delete a video from disk and the database.
 #[tauri::command]
 pub async fn delete_video(video_id: i64, state: State<'_, AppState>) -> Result<()> {
