@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { ArrowDownAZ, ArrowUpAZ, Check, ChevronDown, Film, Link, MoveRight, Pencil, Plus, Star, Tag, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Category, Entity, Video } from '../types'
 import { ConfirmModal } from './ConfirmModal'
@@ -11,13 +11,30 @@ const thumbCache = new Map<string, string>()
 
 function ThumbnailImg({ path, alt }: { path: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(thumbCache.get(path) ?? null)
+  const [visible, setVisible] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Only mark visible once via IntersectionObserver
   useEffect(() => {
-    if (src) return
+    if (src) return // already cached, no need to observe
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setVisible(true); obs.disconnect() }
+    }, { rootMargin: '200px' }) // preload 200px before visible
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [src])
+
+  // Load thumbnail once visible
+  useEffect(() => {
+    if (src || !visible) return
     invoke<string>('get_thumbnail', { path })
       .then((d) => { thumbCache.set(path, d); setSrc(d) })
       .catch(() => {})
-  }, [path])
-  if (!src) return <Film className="w-8 h-8 text-zinc-600" />
+  }, [path, visible, src])
+
+  if (!src) return <div ref={ref} className="w-full h-full flex items-center justify-center"><Film className="w-8 h-8 text-zinc-600" /></div>
   return <img src={src} alt={alt} className="w-full h-full object-cover" />
 }
 
@@ -59,6 +76,16 @@ function refreshLists() {
   invoke<Category[]>('get_categories').then(useStore.getState().setCategories).catch(() => {})
 }
 
+/** Compute menu position so it stays within the viewport. Opens upward if near the bottom. */
+function menuPosition(x: number, y: number, menuWidth = 210) {
+  const pad = 8
+  const left = Math.min(x, window.innerWidth - menuWidth - pad)
+  const openUp = y > window.innerHeight * 0.6
+  return openUp
+    ? { left, bottom: window.innerHeight - y, maxHeight: y - pad }
+    : { left, top: y, maxHeight: window.innerHeight - y - pad }
+}
+
 // ── Single-video context menu ─────────────────────────────────────────────────
 
 function ContextMenu({ x, y, video, onClose, onRefresh }: {
@@ -76,8 +103,7 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
     invoke<Category[]>('get_video_categories', { videoId: video.id }).then(setVideoCats)
   }, [video.id])
 
-  const left = Math.min(x, window.innerWidth - 215)
-  const top  = Math.min(y, window.innerHeight - 230)
+  const pos = menuPosition(x, y)
   const base = 'fixed bg-zinc-800 border border-zinc-600 rounded-lg shadow-2xl py-1 z-50 text-sm w-52'
   const row  = 'w-full px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 flex items-center gap-2 transition-colors'
 
@@ -119,7 +145,7 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
   const others = entities.filter((e) => e.id !== video.entity_id)
 
   if (step === 'link') return (
-    <div className={base} style={{ left, top, maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className={base} style={{ ...pos, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs shrink-0`}>← Back</button>
       <div className="border-t border-zinc-700 my-1 shrink-0" />
       <div className="overflow-y-auto min-h-0">
@@ -133,7 +159,7 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
     </div>
   )
   if (step === 'rename') return (
-    <div className={base} style={{ left, top }}>
+    <div className={base} style={pos}>
       {err && <p className="px-3 py-1.5 text-xs text-red-400 border-b border-zinc-700">{err}</p>}
       <form onSubmit={(e) => { e.preventDefault(); handleRename() }} className="p-2 space-y-2">
         <input
@@ -153,7 +179,7 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
     </div>
   )
   if (step === 'move') return (
-    <div className={base} style={{ left, top, maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className={base} style={{ ...pos, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs shrink-0`}>← Back</button>
       <div className="border-t border-zinc-700 my-1 shrink-0" />
       <div className="overflow-y-auto min-h-0">
@@ -167,7 +193,7 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
     </div>
   )
   if (step === 'cats') return (
-    <div className={base} style={{ left, top }}>
+    <div className={base} style={{ ...pos, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <button onClick={(e) => { e.stopPropagation(); setStep(null) }} className={`${row} text-zinc-400 text-xs`}>← Back</button>
       <div className="border-t border-zinc-700 my-1" />
       {categories.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No categories yet</p>
@@ -183,7 +209,7 @@ function ContextMenu({ x, y, video, onClose, onRefresh }: {
     </div>
   )
   return (
-    <div className={base} style={{ left, top }}>
+    <div className={base} style={pos}>
       {showDeleteConfirm && (
         <ConfirmModal
           message={`Delete "${video.file_name}"?\n\nThis permanently removes the file.`}
@@ -231,8 +257,7 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
 
   useEffect(() => { refreshLists() }, [])
 
-  const left = Math.min(x, window.innerWidth - 225)
-  const top  = Math.min(y, window.innerHeight - 290)
+  const pos = menuPosition(x, y, 225)
   const base = 'fixed bg-zinc-800 border border-zinc-600 rounded-lg shadow-2xl py-1 z-50 text-sm w-56'
   const row  = 'w-full px-3 py-1.5 text-left text-zinc-200 hover:bg-zinc-700 flex items-center gap-2 transition-colors'
 
@@ -263,7 +288,7 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
   const backBtn = (e: React.MouseEvent) => { e.stopPropagation(); setStep(null) }
 
   if (step === 'move') return (
-    <div className={base} style={{ left, top, maxHeight: '60vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className={base} style={{ ...pos, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <button onClick={backBtn} className={`${row} text-zinc-400 text-xs shrink-0`}>← Back</button>
       <div className="border-t border-zinc-700 my-1 shrink-0" />
       <div className="overflow-y-auto min-h-0">
@@ -276,7 +301,7 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
     </div>
   )
   if (step === 'add_cat') return (
-    <div className={base} style={{ left, top }}>
+    <div className={base} style={{ ...pos, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <button onClick={backBtn} className={`${row} text-zinc-400 text-xs`}>← Back</button>
       <div className="border-t border-zinc-700 my-1" />
       {categories.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No categories yet</p>
@@ -288,7 +313,7 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
     </div>
   )
   if (step === 'rm_cat') return (
-    <div className={base} style={{ left, top }}>
+    <div className={base} style={{ ...pos, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <button onClick={backBtn} className={`${row} text-zinc-400 text-xs`}>← Back</button>
       <div className="border-t border-zinc-700 my-1" />
       {categories.length === 0 ? <p className="px-3 py-1.5 text-xs text-zinc-500">No categories yet</p>
@@ -300,7 +325,7 @@ function BulkContextMenu({ x, y, selectedIds, onClose, onRefresh, onClearSelecti
     </div>
   )
   return (
-    <div className={base} style={{ left, top }}>
+    <div className={base} style={pos}>
       {showDeleteConfirm && (
         <ConfirmModal
           message={`Delete ${selectedIds.length} video${selectedIds.length !== 1 ? 's' : ''}?\n\nThis permanently removes the files.`}
@@ -389,11 +414,13 @@ export function VideoGrid() {
   } = useStore()
   const selectedEntity = entities.find((e) => e.id === selectedEntityId)
 
-  // Sort
+  // Sort & filter
   const [sortField, setSortField] = useState<SortField>('file_created_at')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [showSortMenu, setShowSortMenu] = useState(false)
-  const sortedVideos = sortVideos(videos, sortField, sortDir)
+  const [minRating, setMinRating] = useState(0) // 0 = no filter
+  const filteredVideos = minRating > 0 ? videos.filter((v) => v.rating >= minRating) : videos
+  const sortedVideos = sortVideos(filteredVideos, sortField, sortDir)
 
   // Single-video context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; video: Video } | null>(null)
@@ -530,7 +557,7 @@ export function VideoGrid() {
         )}
         {selectedIds.size === 0 && (
           <span className="flex items-center gap-2 ml-auto">
-            <span className="text-xs text-zinc-500">{videos.length} video{videos.length !== 1 ? 's' : ''}</span>
+            <span className="text-xs text-zinc-500">{filteredVideos.length} video{filteredVideos.length !== 1 ? 's' : ''}</span>
             <div className="relative">
               <button
                 onClick={(e) => { e.stopPropagation(); setShowSortMenu((v) => !v) }}
@@ -564,6 +591,19 @@ export function VideoGrid() {
                 ? <ArrowDownAZ className="w-3.5 h-3.5" />
                 : <ArrowUpAZ className="w-3.5 h-3.5" />}
             </button>
+            <span className="border-l border-zinc-700 h-4" />
+            <div className="flex gap-0.5">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={(e) => { e.stopPropagation(); setMinRating(minRating === star ? 0 : star) }}
+                  title={minRating === star ? 'Clear rating filter' : `Show ${star}+ stars`}
+                  className={`transition-colors ${star <= minRating ? 'text-yellow-400' : 'text-zinc-700 hover:text-zinc-500'}`}
+                >
+                  <Star className="w-3 h-3" fill={star <= minRating ? 'currentColor' : 'none'} />
+                </button>
+              ))}
+            </div>
           </span>
         )}
       </div>
@@ -589,6 +629,14 @@ export function VideoGrid() {
               const isSelected = selectedIds.has(video.id)
               return (
                 <div key={video.id}
+                  draggable
+                  onDragStart={(e) => {
+                    const ids = selectedIds.has(video.id) && selectedIds.size > 0
+                      ? Array.from(selectedIds)
+                      : [video.id]
+                    e.dataTransfer.setData('text/plain', `dio-videos:${JSON.stringify(ids)}`)
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
                   onClick={(e) => handleVideoClick(e, video, index)}
                   onContextMenu={(e) => handleVideoContextMenu(e, video)}
                   className={`group relative bg-zinc-800 rounded-lg overflow-hidden cursor-pointer transition-all ${

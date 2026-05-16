@@ -3,7 +3,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { invoke } from '@tauri-apps/api/core'
 import { BookMarked, GripVertical, ListMusic, Play, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store'
 import { Playlist, Video } from '../types'
 import { ConfirmModal } from './ConfirmModal'
@@ -30,10 +30,11 @@ function SortableVideo({ video, index, onRemove }: { video: Video; index: number
 }
 
 export function PlayTray() {
-  const { playQueue, removeFromQueue, reorderQueue, clearQueue, setQueue, openPlayer } = useStore()
+  const { playQueue, removeFromQueue, reorderQueue, clearQueue, setQueue, openPlayer, addToQueue } = useStore()
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [view, setView] = useState<'queue' | 'save' | 'load'>('queue')
   const [newName, setNewName] = useState('')
+  const [dragOver, setDragOver] = useState(false)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
@@ -75,8 +76,44 @@ export function PlayTray() {
     setPlaylistConfirm(null)
   }
 
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(false)
+    const raw = e.dataTransfer.getData('text/plain')
+    if (!raw?.startsWith('dio-videos:')) return
+    try {
+      const ids: number[] = JSON.parse(raw.slice('dio-videos:'.length))
+      const { videos } = useStore.getState()
+      ids.forEach((id) => {
+        const v = videos.find((vid) => vid.id === id)
+        if (v) addToQueue(v)
+      })
+    } catch {}
+  }
+
+  const dragCounter = useRef(0)
+
   return (
-    <div className="bg-zinc-800 border-l border-zinc-700 flex flex-col h-full">
+    <div
+      className={`bg-zinc-800 border-l border-zinc-700 flex flex-col h-full transition-colors ${
+        dragOver ? 'bg-blue-900/20 border-l-blue-500' : ''
+      }`}
+      onDragEnter={(e) => {
+        e.preventDefault()
+        dragCounter.current++
+        setDragOver(true)
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+      }}
+      onDragLeave={() => {
+        dragCounter.current--
+        if (dragCounter.current === 0) setDragOver(false)
+      }}
+      onDrop={(e) => { dragCounter.current = 0; handleDrop(e) }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-700 shrink-0">
         <span className="text-sm font-medium text-zinc-200">Play Tray</span>

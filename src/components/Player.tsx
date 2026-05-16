@@ -41,12 +41,15 @@ export function Player() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !document.fullscreenElement) closePlayer()
       if (e.key === 'f' || e.key === 'F') toggleFullscreen()
-      if (e.key === 'ArrowRight' && hasNext) setPlayerIndex(playerIndex + 1)
-      if (e.key === 'ArrowLeft' && hasPrev) setPlayerIndex(playerIndex - 1)
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+        e.preventDefault()
+        const el = videoRef.current
+        if (el) el.currentTime += e.key === 'ArrowRight' ? 10 : -10
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [playerIndex, hasPrev, hasNext])
+  }, [playerIndex])
 
   if (!playerVideos || !video) return null
 
@@ -56,9 +59,9 @@ export function Player() {
   }
 
   return (
-    <div ref={containerRef} className="fixed inset-0 z-50 bg-black flex flex-col">
+    <div ref={containerRef} className="fixed inset-0 z-50 bg-black flex flex-col group/player">
       {/* Header bar */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-zinc-900/80 shrink-0">
+      <div className="flex items-center gap-3 px-4 py-3 bg-transparent group-hover/player:bg-zinc-900/80 transition-colors shrink-0">
         <div className="flex-1 min-w-0">
           <p className="text-zinc-100 text-sm font-medium truncate">{video.file_name}</p>
           {total > 1 && (
@@ -95,7 +98,7 @@ export function Player() {
 
       {/* Prev / Next */}
       {total > 1 && (
-        <div className="flex items-center justify-center gap-6 py-3 bg-zinc-900/80 shrink-0">
+        <div className="flex items-center justify-center gap-6 py-3 bg-transparent group-hover/player:bg-zinc-900/80 transition-colors shrink-0">
           <button
             onClick={() => setPlayerIndex(playerIndex - 1)}
             disabled={!hasPrev}

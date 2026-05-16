@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -32,8 +32,7 @@ pub async fn find_duplicates(state: State<'_, AppState>) -> Result<Vec<Duplicate
 
     // Load all processed videos
     let videos = sqlx::query_as::<_, Video>(
-        "SELECT * FROM videos WHERE processed = 1 \
-         AND file_size IS NOT NULL AND duration IS NOT NULL",
+        "SELECT * FROM videos WHERE processed = 1",
     )
     .fetch_all(&pool)
     .await?;
@@ -47,29 +46,47 @@ pub async fn find_duplicates(state: State<'_, AppState>) -> Result<Vec<Duplicate
         .map(|e| (e.id, (e.name, e.is_unsorted)))
         .collect();
 
-    // Group by (file_size, duration rounded to nearest second)
-    let mut groups: HashMap<(i64, i64), Vec<DuplicateVideo>> = HashMap::new();
-    for video in videos {
-        if let (Some(size), Some(dur)) = (video.file_size, video.duration) {
-            let (entity_name, entity_is_unsorted) = entity_map
-                .get(&video.entity_id)
-                .cloned()
-                .unwrap_or_else(|| ("Unknown".into(), false));
-            groups
-                .entry((size, dur.round() as i64))
-                .or_default()
-                .push(DuplicateVideo { video, entity_name, entity_is_unsorted });
-        }
-    }
+    let to_dup = |video: &Video| -> DuplicateVideo {
+        let (entity_name, entity_is_unsorted) = entity_map
+            .get(&video.entity_id)
+            .cloned()
+            .unwrap_or_else(|| ("Unknown".into(), false));
+        DuplicateVideo { video: video.clone(), entity_name, entity_is_unsorted }
+    };
 
     let mut sets: Vec<DuplicateSet> = Vec::new();
+    let mut seen_ids: HashSet<i64> = HashSet::new();
 
-    for (_key, group) in groups {
-        if group.len() < 2 {
-            continue;
+    // ── Pass 1: exact fingerprint matches ─────────────────────────────────
+    let mut fp_groups: HashMap<String, Vec<DuplicateVideo>> = HashMap::new();
+    for video in &videos {
+        if let Some(fp) = &video.fingerprint {
+            if !fp.is_empty() {
+                fp_groups.entry(fp.clone()).or_default().push(to_dup(video));
+            }
         }
+    }
+    for (_fp, group) in fp_groups {
+        if group.len() < 2 { continue; }
+        // Mark these video IDs so pass 2 doesn't duplicate them
+        for v in &group { seen_ids.insert(v.video.id); }
+        sets.push(build_set(group, "likely"));
+    }
 
-        // Confidence: exact name match → "exact", fingerprint match → "likely", else "possible"
+    // ── Pass 2: same file_size + rounded duration (skip already-matched) ──
+    let mut size_groups: HashMap<(i64, i64), Vec<DuplicateVideo>> = HashMap::new();
+    for video in &videos {
+        if seen_ids.contains(&video.id) { continue; }
+        if let (Some(size), Some(dur)) = (video.file_size, video.duration) {
+            size_groups
+                .entry((size, dur.round() as i64))
+                .or_default()
+                .push(to_dup(video));
+        }
+    }
+    for (_key, group) in size_groups {
+        if group.len() < 2 { continue; }
+
         let same_name = group.windows(2).all(|w| w[0].video.file_name == w[1].video.file_name);
         let confidence = if same_name {
             "exact"
@@ -83,26 +100,7 @@ pub async fn find_duplicates(state: State<'_, AppState>) -> Result<Vec<Duplicate
                 .unwrap_or(0.0);
             if fp_sim > 0.82 { "likely" } else { "possible" }
         };
-
-        // Suggest which copy to keep
-        let has_entity = group.iter().any(|v| !v.entity_is_unsorted);
-        let has_unsorted = group.iter().any(|v| v.entity_is_unsorted);
-
-        let (suggested_keep_id, suggested_action) = if has_entity && has_unsorted {
-            let keep = group.iter().find(|v| !v.entity_is_unsorted).map(|v| v.video.id);
-            (keep, "delete_unsorted")
-        } else {
-            // All in real entities or all in unsorted → keep oldest (lowest id), link others
-            let keep = group.iter().min_by_key(|v| v.video.id).map(|v| v.video.id);
-            (keep, "link_entities")
-        };
-
-        sets.push(DuplicateSet {
-            videos: group,
-            confidence: confidence.into(),
-            suggested_keep_id,
-            suggested_action: suggested_action.into(),
-        });
+        sets.push(build_set(group, confidence));
     }
 
     // Sort: exact first, then likely, then possible
@@ -181,9 +179,29 @@ pub async fn resolve_duplicate(
     Ok(())
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Compute the similarity (0.0–1.0) between two dHash fingerprint strings.
+fn build_set(group: Vec<DuplicateVideo>, confidence: &str) -> DuplicateSet {
+    let has_entity = group.iter().any(|v| !v.entity_is_unsorted);
+    let has_unsorted = group.iter().any(|v| v.entity_is_unsorted);
+
+    let (suggested_keep_id, suggested_action) = if has_entity && has_unsorted {
+        let keep = group.iter().find(|v| !v.entity_is_unsorted).map(|v| v.video.id);
+        (keep, "delete_unsorted")
+    } else {
+        let keep = group.iter().min_by_key(|v| v.video.id).map(|v| v.video.id);
+        (keep, "link_entities")
+    };
+
+    DuplicateSet {
+        videos: group,
+        confidence: confidence.into(),
+        suggested_keep_id,
+        suggested_action: suggested_action.into(),
+    }
+}
+
+/// Compute the similarity
 /// Each fingerprint is dash-separated 16-char hex values.
 fn fingerprint_similarity(fp1: &str, fp2: &str) -> f64 {
     let parse = |s: &str| -> Vec<u64> {
