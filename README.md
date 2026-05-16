@@ -33,20 +33,31 @@ A media management tool for external hard drives. Dio lets you organise, categor
 - Progress shown in the toolbar during scan
 
 ### Video grid
-- Thumbnails sorted newest-first; shows duration and file size
+- Lazy-loaded thumbnails via IntersectionObserver — only fetches when scrolling into view
+- Sort by: Date Created, Date Modified, Date Added, File Size, Duration, Rating, Name — with asc/desc toggle
+- Star rating filter — click a star in the header to show only videos rated N+ stars
 - 1–5 star rating per video (click to set, click again to clear)
-- **⌘+click** to toggle selection, **Shift+click** for range selection
+- **⌘+A** to select all, **⌘+click** to toggle selection, **Shift+click** for range selection
 - Click empty space to deselect (file-explorer behaviour)
 - Click a thumbnail to open the in-app player
-- Right-click a single video → move to entity, manage categories, delete
-- Right-click a multi-selection → bulk move, bulk add/remove category, bulk delete
-- Add-to-queue button (hover) adds to the play tray
+- Drag videos (single or multi-selected) into the play tray
+- Right-click a single video → rename, move to entity, link to entity, manage categories, delete
+- Right-click a multi-selection → add to play tray, bulk move, bulk add/remove category, bulk delete
+- Smart context menu positioning — opens upward when near the bottom of the screen; entity/category lists scroll within viewport
+- Add-to-queue button (+) on hover adds to the play tray
+
+### Search
+- Global search across video file names, entity names, and category names
+- Split-word matching — each word is matched independently (e.g. "john muscle" finds JohnBronco entity + videos tagged "muscle")
+- Debounced input (300ms) with results capped at 200
+- Search bar in the toolbar with clear button
 
 ### In-app video player
 - Full-screen overlay player backed by the HTML5 `<video>` element
 - Auto-advances to the next video in the queue when playback ends
 - Dot indicator for queue position; Previous / Next buttons
-- Keyboard: `Esc` to close, `←`/`→` to skip
+- Header and controls transparent by default, visible on hover (no dimming while watching)
+- Keyboard: `Esc` to close, `←`/`→` to seek ±10s, `F` for fullscreen
 
 ### Categories
 - Create and delete categories from the sidebar
@@ -56,13 +67,16 @@ A media management tool for external hard drives. Dio lets you organise, categor
 - Category filter badge shown in the grid header
 
 ### Play tray & playlists
-- Drag-and-drop reordering via @dnd-kit
+- Drag videos from the grid into the play tray (single or multi-select)
+- Drag-and-drop reordering within the tray via @dnd-kit
 - Save the current queue as a named playlist
 - Load saved playlists back into the tray
 - Play All opens the in-app player starting at position 0
 
 ### Duplicate detection
-- Staged detection: file size + duration (±1 s) → fingerprint similarity
+- Two-pass detection:
+  - **Pass 1**: exact fingerprint match (catches re-encodes with different names/sizes)
+  - **Pass 2**: file size + rounded duration grouping with fingerprint similarity scoring
 - Confidence levels: **exact** (same filename), **likely** (fingerprint match), **possible**
 - Smart suggestion: entity copy wins over unsorted; unsorted copy is deleted with no link created
 - Cross-entity duplicates: one physical file is kept; the other entity is linked via `video_link` so the video appears in both sidebars
@@ -103,6 +117,7 @@ App preferences (last-connected drive path) are stored locally at:
 - **Phase 5** ✅ — Entity moves, categories, ratings, playlists, in-app player
 - **Phase 6** ✅ — Duplicate detection and staged review workflow
 - **Phase 7** ✅ — Background file watcher (FSEvents + 2s debounce), scan-now banner
+- **Phase 8** ✅ — Search, sort/filter controls, rename, link to entity, drag-to-tray, lazy thumbnails, improved dedup, dark title bar, custom app icon
 
 ## Dev setup
 
