@@ -10,7 +10,7 @@ use crate::{
 pub async fn get_entities(state: State<'_, AppState>) -> Result<Vec<Entity>> {
     let pool = state.get_pool()?;
     let entities = sqlx::query_as::<_, Entity>(
-        "SELECT * FROM entity ORDER BY is_unsorted DESC, name ASC",
+"SELECT * FROM entity ORDER BY is_unsorted DESC, name COLLATE NOCASE ASC",
     )
     .fetch_all(&pool)
     .await?;
