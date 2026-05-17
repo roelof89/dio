@@ -414,6 +414,9 @@ export function VideoGrid() {
   } = useStore()
   const selectedEntity = entities.find((e) => e.id === selectedEntityId)
 
+  // Grid zoom
+  const [thumbSize, setThumbSize] = useState(180)
+
   // Sort & filter
   const [sortField, setSortField] = useState<SortField>('file_created_at')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
@@ -439,12 +442,24 @@ export function VideoGrid() {
     return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
   }, [ctxMenu, bulkMenu, showSortMenu])
 
-  // Cmd+A to select all
+  // Cmd+A select all, Cmd+/- zoom grid
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'a' && sortedVideos.length > 0) {
         e.preventDefault()
         setSelectedIds(new Set(sortedVideos.map((v) => v.id)))
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        setThumbSize((s) => Math.min(400, s + 40))
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '-') {
+        e.preventDefault()
+        setThumbSize((s) => Math.max(120, s - 40))
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === '0') {
+        e.preventDefault()
+        setThumbSize(180)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -495,10 +510,10 @@ export function VideoGrid() {
     } else if (selectedIds.size > 0) {
       setSelectedIds(new Set())
       setLastSelectedIndex(null)
-      openPlayer(videos, index)
+      openPlayer(sortedVideos, index)
     } else {
       setLastSelectedIndex(index)
-      openPlayer(videos, index)
+      openPlayer(sortedVideos, index)
     }
   }
 
@@ -622,9 +637,9 @@ export function VideoGrid() {
           onClick={() => { if (selectedIds.size > 0) setSelectedIds(new Set()) }}
         >
           <p className="text-[10px] text-zinc-600 mb-3">
-            ⌘A select all · ⌘ click to select · shift click for range · right-click for bulk actions
+            ⌘A select all · ⌘+/⌘- zoom · ⌘ click to select · shift click for range · right-click for bulk actions
           </p>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3">
+          <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${thumbSize}px, 1fr))` }}>
             {sortedVideos.map((video, index) => {
               const isSelected = selectedIds.has(video.id)
               return (
